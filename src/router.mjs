@@ -29,7 +29,7 @@ function classify(task) {
     ["security",/security|vulnerability|auth|permission|secret/],
     ["research",/research|compare|evaluate|investigate/],
     ["documentation",/document|readme|guide|specification/],
-    ["infrastructure",/deploy|ci\\/cd|pipeline|docker|kubernetes|cloud/]
+    ["infrastructure",/deploy|ci\/cd|pipeline|docker|kubernetes|cloud/]
   ];
   for (const [name,re] of rules) if(re.test(t)) labels.push(name);
   return labels.length ? labels : ["engineering"];
@@ -46,7 +46,7 @@ export function sortIssue(task) {
     non_goals: [], acceptance_criteria: ["Deliver the requested outcome.", "Run relevant tests or explain why they cannot run."],
     affected_areas: [], dependencies: [], risks: [], unknowns: [], complexity,
     workflow, work_packages: [{ id: "WP-1", objective: task.trim(), independent: complexity.band==="HIGH" }],
-    next_skill_queries: types.map(x => `${x} ${task}`)
+    next_skill_queries: types.map(x => x + " " + task)
   };
 }
 
@@ -75,6 +75,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     if (!fs.existsSync(TRIAGE)) throw new Error("Mandatory sort-the-issue skill is missing.");
     const result=command==="sort" ? sortIssue(task) : routeTask(task,mode);
-    process.stdout.write(JSON.stringify(result,null,2)+"\\n");
-  } catch(error) { process.stderr.write(error.message+"\\n"); process.exitCode=1; }
+    process.stdout.write(JSON.stringify(result,null,2)+"\n");
+  } catch(error) { process.stderr.write(error.message+"\n"); process.exitCode=1; }
 }
