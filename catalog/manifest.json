@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "registry": "https://www.skillsdirectory.com/",
+  "catalog_sync": {
+    "mode": "metadata-first", "requires_api_key": true, "max_page_size": 100,
+    "full_content_access": "tier-dependent", "status": "not_synced",
+    "notes": "Use API pagination and preserve upstream source/license. Do not claim this repository contains the entire directory."
+  },
+  "skills": [
+    { "name": "sort-the-issue", "path": "skills/core/sort-the-issue/SKILL.md", "source": "original", "license": "MIT", "security_status": "locally-authored; review required before production" },
+    { "name": "automatic-skill-router", "path": "skills/core/automatic-skill-router/SKILL.md", "source": "original", "license": "MIT", "security_status": "locally-authored; review required before production" }
+  ]
+}
