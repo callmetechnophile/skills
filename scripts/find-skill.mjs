@@ -10,12 +10,14 @@ if (!query) {
 }
 const indexPath = path.resolve("catalog/skillsdirectory-index.json");
 let skills = [];
+let indexComplete = false;
 try {
   const index = JSON.parse(await fs.readFile(indexPath, "utf8"));
   skills = index.skills || [];
+  indexComplete = Boolean(index.complete);
 } catch {}
 
-if (skills.length === 0) {
+if (!indexComplete || skills.length === 0) {
   const url = new URL("https://www.skillsdirectory.com/api/registry");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", "100");
