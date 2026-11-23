@@ -5,7 +5,8 @@ import { sortIssue, routeTask } from "../src/router.mjs";
 test("sort-the-issue classifies a bug before skill discovery", () => {
   const result=sortIssue("Fix the failing authentication tests");
   assert.equal(result.class.includes("bug"), true);
-  assert.equal(result.complexity.band, "HIGH");
+  assert.equal(result.class.includes("security"), true);
+  assert.equal(result.complexity.band, "LOW");
 });
 
 test("low complexity uses single-agent sequential selection", () => {
