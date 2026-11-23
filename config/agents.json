@@ -1,15 +1,22 @@
 {
   "schema_version": "1",
   "agents": {
-    "antigravity": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agent/skills" },
+    "antigravity": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "antigravity-cli": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
     "claude-code": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".claude/skills" },
     "codex": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
-    "cursor": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".cursor/skills" }
+    "cursor": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "gemini-cli": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "github-copilot": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "opencode": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "windsurf": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".windsurf/skills" }
   },
   "policy": {
-    "triage_skill": "sort-the-issue", "triage_first": true,
+    "triage_skill": "sort-the-issue",
+    "triage_first": true,
     "single_agent_load": "sequential-one-at-a-time",
-    "multi_agent_load": "per-work-package-parallel-if-runtime-supports-it",
-    "complex_single_agent": "spawn-bounded-subagents-if-supported-otherwise-sequential"
+    "multi_agent_load": "one-skill-set-per-work-package; parallel-only-with-runtime-subagents",
+    "complex_single_agent": "spawn-bounded-subagents-if-supported-otherwise-sequential",
+    "all_supported_agents": "use the official skills CLI --agent '*' flag when explicitly requested"
   }
 }
