@@ -1,6 +1,6 @@
 {
   "name": "automatic-agent-skill-router",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,12 @@
     "find": "node scripts/find-skill.mjs",
     "sync:catalog": "node scripts/sync-skillsdirectory.mjs",
     "install:skill": "node scripts/install-skill.mjs",
-    "test": "node --test"
+    "list:skills": "node scripts/list-skills.mjs",
+    "verify:skills": "node scripts/verify-skills.mjs",
+    "update:skills": "node scripts/update-skills.mjs",
+    "test": "node --test tests/**/*.test.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

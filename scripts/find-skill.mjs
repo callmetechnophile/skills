@@ -1,42 +1,105 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
 import path from "node:path";
-import { rankSkills } from "../src/registry.mjs";
+import { fileURLToPath } from "node:url";
+import { LocalRegistry } from "../src/discovery/local-registry.mjs";
+import { InstalledRegistry } from "../src/discovery/installed-registry.mjs";
+import { SkillsDirectoryRegistry } from "../src/discovery/skillsdirectory-registry.mjs";
+import { HybridRanker } from "../src/ranking/hybrid-ranker.mjs";
+import { DirectoryResolver } from "../src/discovery/directory-resolver.mjs";
 
-const query = process.argv.slice(2).join(" ").trim();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const rawArgs = process.argv.slice(2);
+function hasFlag(name) { return rawArgs.includes(name); }
+function getOption(name, fallback = null) {
+  const i = rawArgs.indexOf(name);
+  return i >= 0 ? (rawArgs[i + 1] ?? fallback) : fallback;
+}
+
+const isJson = hasFlag("--json");
+const noNetwork = hasFlag("--no-network");
+const maxSkills = Number(getOption("--max-skills", "10"));
+const targetAgent = getOption("--agent", "antigravity");
+
+// Extract query words
+const queryWords = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  const a = rawArgs[i];
+  if (a === "--max-skills" || a === "--agent" || a === "--workflow") {
+    i++;
+    continue;
+  }
+  if (a.startsWith("--")) continue;
+  queryWords.push(a);
+}
+
+const query = queryWords.join(" ").trim();
 if (!query) {
-  console.error('Usage: npm run find -- "database migration"');
+  process.stderr.write("Usage: npm run find -- \"<search query>\" [--json] [--no-network] [--agent <name>] [--max-skills <n>]\n");
   process.exit(2);
 }
-const indexPath = path.resolve("catalog/skillsdirectory-index.json");
-let skills = [];
-let indexComplete = false;
-try {
-  const index = JSON.parse(await fs.readFile(indexPath, "utf8"));
-  skills = index.skills || [];
-  indexComplete = Boolean(index.complete);
-} catch {}
 
-if (!indexComplete || skills.length === 0) {
-  const url = new URL("https://www.skillsdirectory.com/api/registry");
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", "100");
-  url.searchParams.set("sort", "stars");
-  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20000) });
-  if (!response.ok) throw new Error("SkillsDirectory search failed: HTTP " + response.status);
-  const payload = await response.json();
-  skills = payload.skills || [];
-}
+const localRegistry = new LocalRegistry({ rootDir: ROOT });
+const installedRegistry = new InstalledRegistry({ rootDir: ROOT });
+const remoteRegistry = new SkillsDirectoryRegistry({ rootDir: ROOT, noNetwork });
+const ranker = new HybridRanker({ targetAgent });
+const resolver = new DirectoryResolver();
 
-const matches = rankSkills(skills, query).slice(0, 10);
-if (!matches.length) {
-  console.log("No matching skill found. Sync the catalogue or try a broader query.");
+// Gather from all registries
+const [localSkills, installedSkills, remoteSkills] = await Promise.all([
+  localRegistry.search(query),
+  installedRegistry.search(query),
+  noNetwork ? [] : remoteRegistry.search(query, { limit: 50 })
+]);
+
+const combined = [...localSkills, ...installedSkills, ...remoteSkills];
+const rankResult = await ranker.rank(combined, query, { targetAgent });
+const candidates = rankResult.ranked.slice(0, maxSkills);
+
+if (isJson) {
+  process.stdout.write(JSON.stringify({
+    query,
+    count: candidates.length,
+    matches: candidates.map(c => ({
+      name: c.skill.name,
+      relevanceScore: c.relevanceScore,
+      scoreBreakdown: c.scoreBreakdown,
+      source: c.skill.source || c.skill.registry,
+      repository: c.skill.repository,
+      path: c.skill.path || c.skill.skill_directory,
+      securityResult: c.securityResult,
+      compatibilityResult: c.compatibilityResult,
+      description: c.skill.description
+    }))
+  }, null, 2) + "\n");
   process.exit(0);
 }
-for (const [i, skill] of matches.entries()) {
-  const skillName = String(skill.name || skill.slug).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  console.log((i + 1) + ". " + skill.name + " [" + skill.relevanceScore + "]");
-  console.log("   " + (skill.description || "No description"));
-  console.log("   Source: " + skill.repository + " | Registry: " + skill.slug);
-  console.log("   Verify skill folder, then install: npx -y skills add " + skill.repository + " --skill \"" + skillName + "\" --agent antigravity -y");
+
+if (!candidates.length) {
+  process.stdout.write("No matching skills found. Try syncing the catalog (`npm run sync:catalog`) or broadening the query.\n");
+  process.exit(0);
+}
+
+process.stdout.write(`Found ${candidates.length} matching skills for "${query}":\n\n`);
+
+for (const [i, c] of candidates.entries()) {
+  const s = c.skill;
+  const isLocal = s.source === "local" || s.registry === "local";
+  const isInstalled = s.registry === "installed";
+
+  process.stdout.write(`${i + 1}. ${s.name} [Score: ${c.relevanceScore}]\n`);
+  process.stdout.write(`   Description: ${s.description || "No description provided."}\n`);
+  process.stdout.write(`   Provenance: ${s.repository || s.source || "unknown"} (Registry: ${s.registry || "local"})\n`);
+  process.stdout.write(`   Security: ${c.securityResult} | Compatibility: ${c.compatibilityResult}\n`);
+
+  if (isLocal) {
+    process.stdout.write(`   Action: Local core skill ready for immediate activation at ${s.path}\n`);
+  } else if (isInstalled) {
+    process.stdout.write(`   Action: Already installed in workspace at ${s.installationPath}\n`);
+  } else {
+    // Upstream remote skill
+    const targetFolder = s.skill_directory || s.slug;
+    process.stdout.write(`   Verify upstream tree, then install: npm run install:skill -- --repo "${s.repository}" --skill "${targetFolder}" --agent ${targetAgent}\n`);
+  }
+  process.stdout.write("\n");
 }
