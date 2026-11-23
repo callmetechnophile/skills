@@ -15,14 +15,14 @@
       "name": "sort-the-issue",
       "path": "skills/core/sort-the-issue/SKILL.md",
       "source": "original",
-      "license": "MIT",
+      "license": "Apache-2.0",
       "security_status": "locally-authored; review required before production"
     },
     {
       "name": "automatic-skill-router",
       "path": "skills/core/automatic-skill-router/SKILL.md",
       "source": "original",
-      "license": "MIT",
+      "license": "Apache-2.0",
       "security_status": "locally-authored; review required before production"
     }
   ]
