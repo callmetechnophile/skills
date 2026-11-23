@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "agents": {
+    "antigravity": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agent/skills" },
+    "claude-code": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".claude/skills" },
+    "codex": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".agents/skills" },
+    "cursor": { "supports_skills": true, "subagents": "runtime-dependent", "skill_path": ".cursor/skills" }
+  },
+  "policy": {
+    "triage_skill": "sort-the-issue", "triage_first": true,
+    "single_agent_load": "sequential-one-at-a-time",
+    "multi_agent_load": "per-work-package-parallel-if-runtime-supports-it",
+    "complex_single_agent": "spawn-bounded-subagents-if-supported-otherwise-sequential"
+  }
+}
