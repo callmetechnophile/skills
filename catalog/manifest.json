@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "registry": "https://www.skillsdirectory.com/",
+  "catalog_sync": {
+    "endpoint": "https://www.skillsdirectory.com/api/registry",
+    "mode": "public-metadata-index",
+    "requires_api_key": false,
+    "max_page_size": 100,
+    "full_skill_content": "source-repository; access and redistribution are governed by source and registry tiers",
+    "status": "not_synced",
+    "notes": "Run npm run sync:catalog. The sync script resumes from the persisted nextOffset. It does not download or rehost third-party payloads."
+  },
+  "skills": [
+    {
+      "name": "sort-the-issue",
+      "path": "skills/core/sort-the-issue/SKILL.md",
+      "source": "original",
+      "license": "MIT",
+      "security_status": "locally-authored; review required before production"
+    },
+    {
+      "name": "automatic-skill-router",
+      "path": "skills/core/automatic-skill-router/SKILL.md",
+      "source": "original",
+      "license": "MIT",
+      "security_status": "locally-authored; review required before production"
+    }
+  ]
+}
