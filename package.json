@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "sort": "node src/router.mjs sort", "route": "node src/router.mjs route", "test": "node --test" },
+  "scripts": {
+    "sort": "node src/router.mjs sort",
+    "route": "node src/router.mjs route",
+    "find": "node scripts/find-skill.mjs",
+    "sync:catalog": "node scripts/sync-skillsdirectory.mjs",
+    "install:skill": "node scripts/install-skill.mjs",
+    "test": "node --test"
+  },
   "engines": { "node": ">=20" }
 }
