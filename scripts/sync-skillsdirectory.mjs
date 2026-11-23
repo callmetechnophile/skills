@@ -13,7 +13,8 @@ let state = { source: endpoint, fetchedAt: null, total: null, nextOffset: 0, com
 if (process.env.RESTART !== "1") {
   try {
     const existing = JSON.parse(await fs.readFile(outputPath, "utf8"));
-    if (Array.isArray(existing.skills)) state = existing;
+    // Resume an interrupted sync. A completed index is refreshed from offset 0 on the next run.
+    if (Array.isArray(existing.skills) && existing.complete !== true) state = existing;
   } catch {}
 }
 let offset = Number(process.env.START_OFFSET ?? state.nextOffset ?? 0);
