@@ -68,3 +68,31 @@ jobs:
             if (!manifest.schema_version) throw new Error("Manifest schema version missing");
             console.log("Manifest valid.");
           '
+
+  rust-ci:
+    name: Rust Core CI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cargo Format Check
+        run: cargo fmt --all -- --check
+
+      - name: Cargo Check Workspace
+        run: cargo check --workspace
+
+      - name: Cargo Test Workspace
+        run: cargo test --workspace
+
+      - name: Cargo Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

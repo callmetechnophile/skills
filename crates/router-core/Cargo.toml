@@ -1,0 +1,23 @@
+[package]
+name = "router-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+task-intelligence = { workspace = true }
+issue-analyzer = { workspace = true }
+skill-registry = { workspace = true }
+skill-discovery = { workspace = true }
+skill-ranking = { workspace = true }
+skill-security = { workspace = true }
+skill-activation = { workspace = true }
+agent-orchestrator = { workspace = true }
+runtime-adapters = { workspace = true }
+skill-lifecycle = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

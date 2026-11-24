@@ -1,0 +1,29 @@
+[package]
+name = "router-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "skill-router"
+path = "src/main.rs"
+
+[dependencies]
+router-core = { workspace = true }
+task-intelligence = { workspace = true }
+issue-analyzer = { workspace = true }
+skill-registry = { workspace = true }
+skill-discovery = { workspace = true }
+skill-ranking = { workspace = true }
+skill-security = { workspace = true }
+skill-activation = { workspace = true }
+agent-orchestrator = { workspace = true }
+runtime-adapters = { workspace = true }
+skill-lifecycle = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }

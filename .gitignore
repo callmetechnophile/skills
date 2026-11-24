@@ -6,5 +6,6 @@ coverage/
 .DS_Store
 dist/
 build/
+target/
 *.log
 .installed-skills.json
