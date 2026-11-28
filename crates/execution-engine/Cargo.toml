@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+issue-analyzer = { workspace = true }
+agent-orchestrator = { workspace = true }
 runtime-adapters = { workspace = true }
+skill-activation = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }

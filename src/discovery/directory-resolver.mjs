@@ -76,6 +76,13 @@ export class DirectoryResolver {
    * Resolve exact upstream skill directory.
    */
   async resolveSkillDirectory(repository, targetSkill, options = {}) {
+    if (!repository || typeof repository !== "string") {
+      return {
+        success: false,
+        error: "INVALID_REPOSITORY",
+        message: `Repository is missing or not a string (got ${JSON.stringify(repository)}). Cannot resolve skill directory.`
+      };
+    }
     const parts = repository.split("/");
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
       return {

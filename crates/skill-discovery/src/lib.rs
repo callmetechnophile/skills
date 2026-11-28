@@ -270,6 +270,18 @@ impl DirectoryResolver {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncCatalogResult {
+    #[serde(rename = "totalIndexed")]
+    pub total_indexed: usize,
+    #[serde(rename = "syncedPages")]
+    pub synced_pages: usize,
+    pub complete: bool,
+    #[serde(rename = "nextOffset")]
+    pub next_offset: usize,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillsDirectoryIndex {
     pub source: String,
     pub fetched_at: Option<String>,
@@ -311,6 +323,64 @@ impl SkillsDirectoryRegistry {
                 return idx;
             }
         }
+
+        // Fallback: load catalog/manifest.json if present
+        let manifest_path = self.root_dir.join("catalog").join("manifest.json");
+        if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(items) = val.get("skills").and_then(|s| s.as_array()) {
+                    let mut skills = Vec::new();
+                    for item in items {
+                        let name = item
+                            .get("name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let path = item
+                            .get("path")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let source = item
+                            .get("source")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let license = item
+                            .get("license")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("Apache-2.0")
+                            .to_string();
+                        let sec = item
+                            .get("security_status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("approved-local")
+                            .to_string();
+
+                        skills.push(SkillMetadata {
+                            id: name.clone(),
+                            name: name.clone(),
+                            slug: name.to_lowercase(),
+                            description: String::new(),
+                            path,
+                            source,
+                            license,
+                            security_status: sec,
+                            registry: "catalog-manifest".to_string(),
+                            ..Default::default()
+                        });
+                    }
+
+                    return SkillsDirectoryIndex {
+                        source: self.endpoint.clone(),
+                        fetched_at: None,
+                        total: Some(skills.len()),
+                        next_offset: 0,
+                        complete: false,
+                        skills,
+                    };
+                }
+            }
+        }
+
         SkillsDirectoryIndex {
             source: self.endpoint.clone(),
             fetched_at: None,
@@ -319,6 +389,120 @@ impl SkillsDirectoryRegistry {
             complete: false,
             skills: vec![],
         }
+    }
+
+    pub async fn sync_catalog(
+        &self,
+        limit: usize,
+        reset: bool,
+    ) -> Result<SyncCatalogResult, DiscoveryError> {
+        let mut index = if reset {
+            SkillsDirectoryIndex {
+                source: self.endpoint.clone(),
+                fetched_at: None,
+                total: None,
+                next_offset: 0,
+                complete: false,
+                skills: vec![],
+            }
+        } else {
+            self.load_index()
+        };
+
+        let page_size = std::cmp::min(limit, 100);
+        let mut pages = 0;
+        let mut offset = index.next_offset;
+        let max_pages = limit.div_ceil(page_size);
+
+        if !self.no_network && max_pages > 0 {
+            while pages < max_pages {
+                let url = format!("{}?offset={}&limit={}", self.endpoint, offset, page_size);
+                match self
+                    .client
+                    .get(&url)
+                    .header("Accept", "application/json")
+                    .send()
+                    .await
+                {
+                    Ok(res) if res.status().is_success() => {
+                        if let Ok(payload) = res.json::<serde_json::Value>().await {
+                            if let Some(items) = payload.get("skills").and_then(|s| s.as_array()) {
+                                if items.is_empty() {
+                                    index.complete = true;
+                                    break;
+                                }
+                                for item in items {
+                                    let slug = item
+                                        .get("slug")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    if !slug.is_empty()
+                                        && !index.skills.iter().any(|s| s.slug == slug)
+                                    {
+                                        let name = item
+                                            .get("name")
+                                            .and_then(|s| s.as_str())
+                                            .unwrap_or(&slug)
+                                            .to_string();
+                                        let description = item
+                                            .get("description")
+                                            .and_then(|s| s.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let repo = item
+                                            .get("repository")
+                                            .and_then(|s| s.as_str())
+                                            .map(|s| s.to_string());
+                                        let skill_dir = item
+                                            .get("skill_directory")
+                                            .and_then(|s| s.as_str())
+                                            .map(|s| s.to_string());
+                                        index.skills.push(SkillMetadata {
+                                            id: format!("sd:{}", slug),
+                                            name,
+                                            slug,
+                                            description,
+                                            repository: repo,
+                                            skill_directory: skill_dir,
+                                            registry: "skillsdirectory".to_string(),
+                                            ..Default::default()
+                                        });
+                                    }
+                                }
+                                offset += items.len();
+                                pages += 1;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        index.next_offset = offset;
+        index.fetched_at = Some(chrono::Utc::now().to_rfc3339());
+        index.total = Some(index.skills.len());
+
+        // Atomic write
+        let parent = self.index_path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)?;
+        let tmp_path = parent.join(format!(".catalog.tmp.{}", uuid::Uuid::new_v4()));
+        let json = serde_json::to_string_pretty(&index)? + "\n";
+        std::fs::write(&tmp_path, json)?;
+        std::fs::rename(&tmp_path, &self.index_path)?;
+
+        Ok(SyncCatalogResult {
+            total_indexed: index.skills.len(),
+            synced_pages: pages,
+            complete: index.complete,
+            next_offset: index.next_offset,
+            source: self.endpoint.clone(),
+        })
     }
 }
 

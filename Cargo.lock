@@ -296,8 +296,12 @@ dependencies = [
 name = "execution-engine"
 version = "0.3.0"
 dependencies = [
+ "agent-orchestrator",
+ "issue-analyzer",
  "runtime-adapters",
  "serde",
+ "serde_json",
+ "skill-activation",
  "thiserror",
 ]
 
@@ -1001,6 +1005,7 @@ name = "router-core"
 version = "0.3.0"
 dependencies = [
  "agent-orchestrator",
+ "execution-engine",
  "issue-analyzer",
  "runtime-adapters",
  "serde",
@@ -1015,6 +1020,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1201,6 +1207,8 @@ dependencies = [
  "runtime-adapters",
  "serde",
  "serde_json",
+ "skill-registry",
+ "skill-security",
  "thiserror",
 ]
 
@@ -1209,6 +1217,7 @@ name = "skill-discovery"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "reqwest",
  "serde",
  "serde_json",
@@ -1216,6 +1225,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1223,12 +1233,16 @@ name = "skill-lifecycle"
 version = "0.3.0"
 dependencies = [
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "skill-discovery",
  "skill-registry",
  "skill-security",
  "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

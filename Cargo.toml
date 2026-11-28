@@ -34,6 +34,7 @@ skill-activation = { path = "crates/skill-activation" }
 agent-orchestrator = { path = "crates/agent-orchestrator" }
 runtime-adapters = { path = "crates/runtime-adapters" }
 skill-lifecycle = { path = "crates/skill-lifecycle" }
+execution-engine = { path = "crates/execution-engine" }
 
 tokio = { version = "1.38", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls"] }

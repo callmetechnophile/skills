@@ -54,6 +54,28 @@ pub struct SkillMetadata {
     pub source: Option<String>,
 }
 
+impl Default for SkillMetadata {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            slug: String::new(),
+            description: String::new(),
+            path: None,
+            repository: None,
+            skill_directory: None,
+            license: default_license(),
+            security_status: default_security_status(),
+            verified: false,
+            supported_agents: None,
+            tags: vec![],
+            stars: 0,
+            registry: "local".to_string(),
+            source: None,
+        }
+    }
+}
+
 fn default_license() -> String {
     "Apache-2.0".to_string()
 }

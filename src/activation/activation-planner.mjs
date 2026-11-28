@@ -132,6 +132,17 @@ export class ActivationPlanner {
         });
       } else {
         // Stage 3: Remote skill requiring installation
+        // Guard: skill.repository must be a non-empty string before directory resolution
+        if (!skill.repository || typeof skill.repository !== "string") {
+          failures.push({
+            workPackageId: wp.id,
+            skillName: skill.name || skill.id || "unknown",
+            status: "FAILED",
+            reason: "MISSING_REPOSITORY",
+            message: `Remote skill candidate has no 'repository' field. Cannot resolve install directory.`
+          });
+          continue;
+        }
         // Check exact directory resolution before recommending install
         const resolution = await this.directoryResolver.resolveSkillDirectory(
           skill.repository,

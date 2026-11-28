@@ -2,11 +2,11 @@ use agent_orchestrator::{DependencyGraph, ExecutionPlan};
 use issue_analyzer::{IssueAnalysis, IssueSorter};
 use runtime_adapters::get_runtime_adapter;
 use serde::{Deserialize, Serialize};
-use skill_activation::{ActivationReport, SkillActivationRecord};
+use skill_activation::{ActivationEngine, ActivationReport, SkillActivationRecord};
 use skill_discovery::{DirectoryResolver, InstalledRegistry, SkillsDirectoryRegistry};
 use skill_lifecycle::InstalledTracker;
 use skill_ranking::{HybridRanker, RankedSkill};
-use skill_registry::{compute_sha256, LocalRegistry, RegistryProvider};
+use skill_registry::{LocalRegistry, RegistryProvider};
 use skill_security::{TrustPolicy, TrustScanner};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -195,60 +195,27 @@ impl SkillRouter {
                     match content_ref {
                         Ok(cr) => {
                             let assessment = self.scanner.scan(&cr.raw_content, &skill);
-                            let (can_act, reason, msg) =
-                                self.policy.can_activate(&assessment, false);
-
-                            if !can_act {
-                                failures.push(SkillActivationRecord {
-                                    work_package_id: wp.id.clone(),
-                                    skill_name: skill.name.clone(),
-                                    status: "BLOCKED".to_string(),
-                                    source_type: if is_local {
-                                        "local-repository".to_string()
-                                    } else {
-                                        "locally-installed".to_string()
-                                    },
-                                    source_location: skill.path.clone().unwrap_or_default(),
-                                    exact_directory: None,
-                                    install_command: None,
-                                    trust_status: assessment.trust_status.as_str().to_string(),
-                                    content_hash: Some(assessment.content_hash),
-                                    verified: false,
-                                    instruction_payload: None,
-                                    reason,
-                                    message: msg,
-                                    note: None,
-                                });
+                            let source_type = if is_local {
+                                "local-repository"
                             } else {
-                                let payload = adapter.format_instruction_payload(
-                                    &wp.id,
-                                    &wp.component,
-                                    &skill.name,
-                                    &cr.raw_content,
-                                );
-                                let actual_hash = compute_sha256(&cr.raw_content);
-                                let verified = actual_hash == assessment.content_hash;
+                                "locally-installed"
+                            };
+                            let source_location = skill.path.as_deref().unwrap_or_default();
 
-                                activations.push(SkillActivationRecord {
-                                    work_package_id: wp.id.clone(),
-                                    skill_name: skill.name.clone(),
-                                    status: "ACTIVATED".to_string(),
-                                    source_type: if is_local {
-                                        "local-repository".to_string()
-                                    } else {
-                                        "locally-installed".to_string()
-                                    },
-                                    source_location: skill.path.clone().unwrap_or_default(),
-                                    exact_directory: None,
-                                    install_command: None,
-                                    trust_status: assessment.trust_status.as_str().to_string(),
-                                    content_hash: Some(actual_hash),
-                                    verified,
-                                    instruction_payload: Some(payload),
-                                    reason: None,
-                                    message: None,
-                                    note: None,
-                                });
+                            match ActivationEngine::activate(
+                                &wp.id,
+                                &wp.component,
+                                &skill.name,
+                                &cr.raw_content,
+                                source_type,
+                                source_location,
+                                &assessment,
+                                &self.policy,
+                                adapter.as_ref(),
+                                false,
+                            ) {
+                                Ok(record) => activations.push(record),
+                                Err(record) => failures.push(*record),
                             }
                         }
                         Err(e) => {
@@ -383,5 +350,50 @@ impl SkillRouter {
         let ranker = HybridRanker::new(agent);
         let result = ranker.rank(&candidates, query, Some(agent), false);
         result.ranked.into_iter().take(limit).collect()
+    }
+
+    pub fn prepare_execution(
+        &self,
+        result: &RouteResult,
+    ) -> Option<execution_engine::PreparedExecutionBatch> {
+        result.execution_plan.as_ref().map(|plan| {
+            execution_engine::ExecutionEngine::prepare_execution(
+                plan,
+                &result.activation.activations,
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_task_returns_error() {
+        let router = SkillRouter::new(".", true);
+        let res = router.sort("   ", None);
+        assert!(matches!(res, Err(RouterError::EmptyTask)));
+    }
+
+    #[test]
+    fn test_missing_mandatory_skill_returns_error() {
+        let temp_dir = std::env::temp_dir().join(format!("test_no_sort_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let router = SkillRouter::new(&temp_dir, true);
+        let res = router.sort("Fix login button bug", None);
+        assert!(matches!(res, Err(RouterError::MissingMandatorySkill)));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_route_options_defaults() {
+        let opts = RouteOptions::default();
+        assert_eq!(opts.agent, "antigravity");
+        assert!(!opts.no_network);
+        assert!(!opts.local_only);
+        assert!(opts.strict_compatibility);
     }
 }

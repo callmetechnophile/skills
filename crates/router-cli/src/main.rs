@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use router_core::{RouteOptions, SkillRouter};
 use skill_discovery::DirectoryResolver;
-use skill_lifecycle::{InstalledSkill, InstalledTracker};
+use skill_lifecycle::{InstallOptions, InstalledTracker};
 use std::path::PathBuf;
 use std::process;
 
@@ -253,18 +253,30 @@ async fn main() {
             }
             Ok(())
         }
-        Some(Commands::SyncCatalog { limit: _, reset: _ }) => {
-            let index = router.remote_registry.load_index();
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&index).unwrap());
-            } else {
-                println!(
-                    "Catalog index contains {} skills. Source: {}",
-                    index.skills.len(),
-                    index.source
-                );
+        Some(Commands::SyncCatalog { limit, reset }) => {
+            match router.remote_registry.sync_catalog(limit, reset).await {
+                Ok(result) => {
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    } else {
+                        println!(
+                            "Registry sync complete: {} skills indexed across {} page(s).",
+                            result.total_indexed, result.synced_pages
+                        );
+                        if !result.complete {
+                            println!(
+                                "Partial sync saved at next offset {}. Re-run sync:catalog to resume.",
+                                result.next_offset
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Sync error: {}", e);
+                    process::exit(1);
+                }
             }
-            Ok(())
         }
         Some(Commands::InstallSkill {
             repo,
@@ -278,98 +290,166 @@ async fn main() {
                 .resolve_skill_directory(&repo, &skill, None, None)
                 .await;
             if !resolution.success {
-                eprintln!("Error: {}", resolution.message.unwrap_or_default());
+                let err_msg = resolution
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Directory resolution failed.".to_string());
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&resolution).unwrap());
+                } else {
+                    eprintln!("Error: {}", err_msg);
+                }
                 process::exit(1);
             }
 
-            let exact_dir = resolution.exact_directory.unwrap();
-            let install_cmd = resolution.install_command.unwrap();
+            let exact_dir = resolution.exact_directory.clone().unwrap_or_default();
+            let install_cmd = resolution.install_command.clone().unwrap_or_default();
 
             if !execute {
-                println!("=== Skill Installation Dry Run ===");
-                println!("Repository: {}", repo);
-                println!("Resolved Directory: {}", exact_dir);
-                println!("Target Agent: {}", agent);
-                println!("Install Command: {}", install_cmd);
-                println!("License: Reviewed upstream license");
-                println!("\nPass --execute to confirm and install this skill.");
+                if cli.json {
+                    let preview = serde_json::json!({
+                        "status": "DRY_RUN",
+                        "repository": repo,
+                        "targetSkill": skill,
+                        "exactDirectory": exact_dir,
+                        "installCommand": install_cmd,
+                        "targetAgent": agent,
+                        "action": "Re-run with --execute to perform installation."
+                    });
+                    println!("{}", serde_json::to_string_pretty(&preview).unwrap());
+                } else {
+                    println!("=== Skill Installation Plan (Dry Run) ===");
+                    println!("Repository: {}", repo);
+                    println!("Requested Skill: {}", skill);
+                    println!("Resolved Directory: {}", exact_dir);
+                    println!("Target Agent: {}", agent);
+                    println!("Install Command: {}", install_cmd);
+                    println!("License: Reviewed upstream license");
+                    println!("\nDry run only. Re-run with --execute after reviewing the upstream source and license.");
+                }
                 Ok(())
             } else {
                 let tracker = InstalledTracker::new(&root_dir);
-                let skill_id = format!("{}:{}", repo, skill);
-                let record = InstalledSkill {
-                    skill_id: skill_id.clone(),
-                    name: skill.clone(),
-                    version: "1.0.0".to_string(),
-                    source: repo,
-                    commit_sha: "main".to_string(),
-                    license: "MIT".to_string(),
-                    installation_path: exact_dir.clone(),
-                    target_agent: agent,
-                    content_hash: "unverified".to_string(),
-                    trust_status: "APPROVED".to_string(),
-                    installed_at: chrono::Utc::now(),
-                    last_verification: chrono::Utc::now(),
+                let options = InstallOptions {
+                    repo,
+                    skill: skill.clone(),
+                    agent,
+                    force,
+                    token: None,
+                    tree_fixture: None,
+                    content_fixture: None,
                 };
 
-                match tracker.record_installation(record, force) {
-                    Ok(_) => {
-                        println!(
-                            "Skill '{}' successfully recorded in .installed-skills.json",
-                            skill
-                        );
+                match tracker.install_skill(&options).await {
+                    Ok(installed) => {
+                        if cli.json {
+                            println!("{}", serde_json::to_string_pretty(&installed).unwrap());
+                        } else {
+                            println!(
+                                "\nSkill '{}' successfully installed and recorded in .installed-skills.json.",
+                                installed.name
+                            );
+                            println!("  Path: {}", installed.installation_path);
+                            println!("  Content SHA-256: {}", installed.content_hash);
+                            println!("  Trust Status: {}", installed.trust_status);
+                        }
                         Ok(())
                     }
-                    Err(e) => Err(e.to_string()),
+                    Err(e) => {
+                        eprintln!("Error during installation: {}", e);
+                        process::exit(1);
+                    }
                 }
             }
         }
         Some(Commands::ListSkills {}) => {
             let tracker = InstalledTracker::new(&root_dir);
-            let skills = tracker.list_skills();
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&skills).unwrap());
-            } else {
-                println!("=== Installed Skills ({}) ===", skills.len());
-                for s in skills {
-                    println!(
-                        "- {} (Source: {}, Version: {})",
-                        s.name, s.source, s.version
-                    );
+            match tracker.list_skills() {
+                Ok(skills) => {
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&skills).unwrap());
+                    } else if skills.is_empty() {
+                        println!("No skills currently recorded in .installed-skills.json.");
+                    } else {
+                        println!("=== Installed Skills ({}) ===", skills.len());
+                        for s in skills {
+                            println!(
+                                "- {} (Source: {}, Version: {})",
+                                s.name, s.source, s.version
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error loading ledger: {}", e);
+                    process::exit(1);
                 }
             }
-            Ok(())
         }
         Some(Commands::VerifySkills {}) => {
             let tracker = InstalledTracker::new(&root_dir);
-            let report = tracker.verify_skills();
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&report).unwrap());
-            } else {
-                println!("=== Skill Integrity Report ===");
-                println!(
-                    "Total: {}, Intact: {}, Modified: {}, Missing: {}",
-                    report.total, report.intact, report.modified, report.missing
-                );
-                for d in &report.details {
-                    println!(
-                        "- [{}]: {} ({})",
-                        d.status,
-                        d.name,
-                        if d.verified { "Passed" } else { "Failed" }
-                    );
+            match tracker.verify_skills() {
+                Ok(report) => {
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                    } else {
+                        println!("=== Skill Integrity Report ===");
+                        println!(
+                            "Total: {}, Intact: {}, Modified: {}, Missing: {}",
+                            report.total, report.intact, report.modified, report.missing
+                        );
+                        for d in &report.details {
+                            println!(
+                                "- [{}]: {} ({})",
+                                d.status,
+                                d.name,
+                                if d.verified { "Passed" } else { "Failed" }
+                            );
+                        }
+                    }
+                    if report.modified > 0 || report.missing > 0 {
+                        process::exit(1);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error verifying skills: {}", e);
+                    process::exit(1);
                 }
             }
-            Ok(())
         }
         Some(Commands::UpdateSkills { force: _ }) => {
             let tracker = InstalledTracker::new(&root_dir);
-            let report = tracker.verify_skills();
-            println!(
-                "Checked {} installed skills. Everything up-to-date.",
-                report.total
-            );
-            Ok(())
+            match tracker.check_for_updates().await {
+                Ok(updates) => {
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "total": updates.len(),
+                                "updates": updates
+                            }))
+                            .unwrap()
+                        );
+                    } else if updates.is_empty() {
+                        println!("No installed skills tracked to update.");
+                    } else {
+                        println!("=== INSTALLED SKILLS UPDATE STATUS ===");
+                        for u in &updates {
+                            println!(
+                                "- {} (Source: {}, Version: {}) -> {}",
+                                u.name, u.source, u.current_version, u.status
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error checking updates: {}", e);
+                    process::exit(1);
+                }
+            }
         }
         None => {
             if cli.task_words.is_empty() {
