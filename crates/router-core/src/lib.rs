@@ -408,40 +408,39 @@ mod tests {
         )
         .unwrap();
 
-        // Install a multi-file skill into the temp workspace
-        let tracker = InstalledTracker::new(&temp_dir);
-        let install_opts = skill_lifecycle::InstallOptions {
-            repo: "owner/repo".to_string(),
-            skill: "auth-fixer".to_string(),
-            agent: "antigravity".to_string(),
-            tree_fixture: Some(vec![
-                skill_discovery::GitTreeItem {
-                    path: "auth-fixer/SKILL.md".to_string(),
-                    item_type: "blob".to_string(),
-                    sha: "1".to_string(),
-                    size: None,
-                    mode: None,
-                },
-                skill_discovery::GitTreeItem {
-                    path: "auth-fixer/scripts/check.sh".to_string(),
-                    item_type: "blob".to_string(),
-                    sha: "2".to_string(),
-                    size: None,
-                    mode: None,
-                },
-            ]),
-            files_fixture: Some(vec![
-                (
-                    "SKILL.md".to_string(),
-                    "---\nname: auth-fixer\ndescription: Fix auth login bugs\n---\n# Auth Fixer"
-                        .to_string(),
-                ),
-                ("scripts/check.sh".to_string(), "echo ok".to_string()),
-            ]),
-            commit_sha_fixture: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
-            ..Default::default()
-        };
-        tracker.install_skill(&install_opts).await.unwrap();
+        // Install a multi-file skill into the temp workspace ledger with canonical directory hash
+        let skill_dir = temp_dir.join(".agents/skills/auth-fixer");
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: auth-fixer\ndescription: Fix auth login bugs\n---\n# Auth Fixer",
+        )
+        .unwrap();
+        std::fs::write(skill_dir.join("scripts/check.sh"), "echo ok").unwrap();
+        let dir_hash = skill_registry::compute_directory_sha256(&skill_dir).unwrap();
+        let ledger = serde_json::json!({
+            "schema_version": "1.0",
+            "last_updated": "2026-01-01T00:00:00Z",
+            "installed": [{
+                "skillId": "owner/repo:auth-fixer",
+                "name": "auth-fixer",
+                "version": "1.0.0",
+                "source": "owner/repo",
+                "commitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "license": "MIT",
+                "installationPath": ".agents/skills/auth-fixer",
+                "targetAgent": "antigravity",
+                "contentHash": dir_hash,
+                "trustStatus": "APPROVED",
+                "installedAt": "2026-01-01T00:00:00Z",
+                "lastVerification": "2026-01-01T00:00:00Z"
+            }]
+        });
+        std::fs::write(
+            temp_dir.join(".installed-skills.json"),
+            serde_json::to_string_pretty(&ledger).unwrap(),
+        )
+        .unwrap();
 
         // Tamper with the supporting file on disk!
         std::fs::write(

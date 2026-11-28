@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2.4] - 2026-11-29 (feat/rust-core-v0.3)
+
+### Changed
+- **Production Installation API Isolation (`skill-lifecycle` & `router-core`):** Removed `tree_fixture`, `content_fixture`, `files_fixture`, and `commit_sha_fixture` from public `InstallOptions`. Moved all fixture injection into `#[cfg(test)]`-only `TestInstallHooks` and `install_skill_with_hooks()`, ensuring production builds always execute upstream HTTP retrieval with zero fixture bypasses.
+- **Tests:** Updated `router-core` and `skill-lifecycle` tests and added `test_production_install_path_uses_upstream_http_retrieval` and `test_invalid_commit_sha_fixture_rejected`.
+
 ## [0.3.2.3] - 2026-11-29 (feat/rust-core-v0.3)
 
 ### Changed
