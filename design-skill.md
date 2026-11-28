@@ -876,6 +876,65 @@ Do not blend all five references into one design. Select a coherent direction. A
 - Test on the actual minimum target device class, not only a high-end desktop.
 - Ensure navigation, forms, text, and primary actions remain usable if animation or media fails.
 
+### Website Section & Styling Intelligence Registry
+
+This registry is mandatory for website and frontend projects when the relevant page sections exist. It complements, but does not replace, the Visual Concept Decision Engine, Mobbin product-UX research, visual inspiration references, and UI component-library evaluation.
+
+These resources are research sources and pattern galleries, not automatically approved dependencies or licenses to copy designs.
+
+| Resource | URL | Research focus | Use when |
+|---|---|---|---|
+| Scrolltide | https://scrolltide.co/ | Full-page templates, interactive sections, scroll-driven experiences, shaders, 3D scenes, motion and implementation ideas | The product needs a distinctive landing page, immersive section, motion system or high-impact visual treatment |
+| Navbar Gallery | https://navbar.gallery/ | Navigation patterns: sticky and responsive navigation, dropdowns, mega menus, sidebars, mobile navigation and announcement bars | Designing or revising site-wide navigation |
+| Footer Design | https://footer.design/ | Footer composition, link hierarchy, newsletter forms, brand closure, social links and legal/navigation groupings | Designing or revising the global footer |
+| CTA Gallery | https://cta.gallery/ | Call-to-action sections, conversion hierarchy, buttons, forms, banners and supporting copy patterns | Designing conversion points, signup prompts, contact sections or campaign pages |
+| Refero Styles | https://styles.refero.design/ | Real-world website styling, visual systems, typography, color, layout and design-language patterns | Establishing or refining a website's visual language and styling system |
+
+#### Mandatory section-research procedure
+
+1. First approve the product's visual concept and design direction. Never use these galleries to choose a trend before understanding product goals, users, content and constraints.
+2. Identify which page sections actually exist in the product: navigation, hero, feature/content sections, social proof, pricing, CTA, footer, and any product-specific sections. Do not add sections merely because a gallery contains them.
+3. Inspect the relevant resource(s) for each section. Record `NOT INSPECTED` when browsing is unavailable; never claim a review that did not occur.
+4. Extract high-level design observations: layout, hierarchy, typography, spacing, density, color usage, responsive behavior, interaction and motion.
+5. Separate observed facts from interpretation and proposed adaptation. Do not infer source code, framework, library, accessibility, performance or licensing from screenshots alone.
+6. Select patterns that support the approved visual concept and the product's user journeys. Avoid mixing unrelated patterns into an incoherent page.
+7. Record chosen references in `design.md` with URL, inspection date, target section, observed pattern, intended adaptation and rationale. Record material rejected references and reasons where useful.
+8. Do not copy proprietary source code, logos, imagery, exact compositions or distinctive visual expression. Produce an original implementation based on transferable design principles.
+9. Verify commercial-use rights before using any template, asset, source code or paid component. A publicly viewable page is not automatically free to reuse.
+10. If a resource is unavailable, use the other verified references and document the limitation. Do not fabricate search results.
+
+#### Section-to-resource mapping
+
+- **Navigation:** use Navbar Gallery for pattern research; validate behavior against the actual information architecture, keyboard access, mobile layout and accessibility requirements.
+- **Hero and immersive sections:** use Scrolltide for layout and interaction inspiration when appropriate; check loading cost, reduced-motion behavior, fallback rendering and device performance before adopting advanced effects.
+- **CTA sections:** use CTA Gallery to compare hierarchy, placement, form friction and action clarity. Choose conversion patterns appropriate to the product and user intent.
+- **Footer:** use Footer Design to evaluate information grouping, legal links, contact details, secondary navigation and responsive collapse behavior.
+- **Overall styling:** use Refero Styles to inspect typography, color, spacing, composition and visual consistency. Reconcile findings with the already approved visual concept and design tokens.
+
+#### Scrolltide implementation guardrails
+
+- Treat templates, code and assets as separate licensing questions; verify permissions before reuse.
+- Do not introduce WebGL, shaders, 3D, canvas, video or scroll hijacking unless the approved product experience justifies the cost.
+- Preserve native scrolling and core content access.
+- Provide reduced-motion and low-capability-device alternatives.
+- Lazy-load non-critical media and split heavy code.
+- Measure real loading and interaction performance on the minimum target device class.
+- Ensure navigation, text, forms and primary actions remain usable if animation or media fails.
+
+#### Required output in design.md
+
+Add a `Website Section Research` section containing:
+
+- Page and section inventory, with sections marked required, optional or out of scope.
+- Reference sources inspected, URLs and inspection dates.
+- Per-section observations, interpretation and original adaptation.
+- Chosen navigation, hero, content, CTA and footer patterns as applicable.
+- Responsive, accessibility, reduced-motion and performance constraints.
+- Licensing or asset-use checks where third-party materials are proposed.
+- Unavailable sources, rejected patterns and unresolved questions.
+
+Do not treat a gallery reference as an implementation dependency. UI libraries are selected separately through the Library Compatibility Gate after visual concept approval.
+
 ### Design skills and specialist tools
 
 Discover available skills and integrations before invoking them. Use
