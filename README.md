@@ -173,3 +173,13 @@ The test suite covers:
 - Static security scanning (prompt injection, exfiltration, destructive commands)
 - Installed skill lifecycle, tamper detection, and overwrite protection
 - End-to-end scenarios 1 through 7 (Simple task, Full-stack task, Missing skill, Unsafe skill, Unsupported runtime, Interrupted install, and Local modification).
+
+---
+
+## 7. Release Roadmap
+
+- **V0.1 (Legacy Prototype):** Initial proof-of-concept exploring keyword discovery and basic routing.
+- **V0.2 (Stable Node.js Baseline — Frozen):** Complete engineering remediation. Functional task intelligence, 5-factor hybrid ranking, static security scanning, exact Git tree directory resolution, DAG wave orchestration with Mode C sequential fallback, lifecycle tracking, and 33 passing automated tests. Tag: `v0.2.0`.
+- **V0.3 (Rust Core Engine — Active Specification):** Migration of the core routing and discovery engine into a high-performance, modular Cargo workspace (`router-core`, `task-intelligence`, `skill-discovery`, `skill-ranking`, `skill-security`, `skill-activation`, `agent-orchestrator`, `skill-lifecycle`, `router-cli`). Provides single self-contained native binary distribution, sub-15ms cold start, and Tantivy-powered search.
+- **V0.4 (Enterprise & Local Neural Models):** Local ONNX Runtime neural embeddings, SQLite catalogue indexing for 100k+ skills, and interactive terminal UI.
+
