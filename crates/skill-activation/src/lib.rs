@@ -512,4 +512,33 @@ mod tests {
         assert!(md.contains("test-skill"));
         assert!(md.contains("Successfully Activated: 1"));
     }
+
+    #[test]
+    fn test_unscanned_and_scanning_states_are_blocked() {
+        let content = "# Unscanned Skill";
+        let hash = compute_sha256(content);
+        let policy = TrustPolicy::new();
+        let adapter = get_runtime_adapter("antigravity");
+
+        for status in [TrustStatus::Unscanned, TrustStatus::Scanning] {
+            let assessment = mock_assessment(status, &hash);
+            let res = ActivationEngine::activate(
+                "WP-01",
+                "comp",
+                "unscanned-skill",
+                content,
+                "local",
+                "skills/u",
+                &assessment,
+                &policy,
+                adapter.as_ref(),
+                true, // Even with force=true, UNSCANNED and SCANNING must be blocked
+            );
+            assert!(res.is_err(), "{:?} must be blocked", status);
+            let rec = res.unwrap_err();
+            assert_eq!(rec.status, "BLOCKED");
+            assert_eq!(rec.reason.as_deref(), Some("UNSCANNED"));
+            assert!(!rec.verified);
+        }
+    }
 }

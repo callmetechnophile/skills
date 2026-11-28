@@ -20,9 +20,149 @@ pub enum RegistryError {
 }
 
 pub fn compute_sha256(content: &str) -> String {
+    compute_bytes_sha256(content.as_bytes())
+}
+
+pub fn compute_bytes_sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
+    hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+/// Computes a deterministic SHA-256 digest over a set of `(relative_path, content_bytes)` entries.
+///
+/// Canonical format:
+/// 1. Normalize path separators to `/` and strip leading `./`.
+/// 2. Sort entries lexicographically by normalized relative path bytes.
+/// 3. For each entry, feed `u64::to_le_bytes(path.len())`, `path.as_bytes()`,
+///    `u64::to_le_bytes(content.len())`, and `content` into SHA-256.
+pub fn compute_entries_sha256(entries: &[(String, Vec<u8>)]) -> String {
+    let mut normalized: Vec<(String, &[u8])> = entries
+        .iter()
+        .map(|(p, bytes)| {
+            let norm = p.replace('\\', "/");
+            let norm = norm.strip_prefix("./").unwrap_or(&norm).to_string();
+            (norm, bytes.as_slice())
+        })
+        .collect();
+
+    normalized.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+
+    let mut hasher = Sha256::new();
+    for (rel_path, content) in normalized {
+        hasher.update((rel_path.len() as u64).to_le_bytes());
+        hasher.update(rel_path.as_bytes());
+        hasher.update((content.len() as u64).to_le_bytes());
+        hasher.update(content);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn is_temp_or_ignored_filename(name: &str) -> bool {
+    name == ".DS_Store" || name.ends_with(".tmp") || name.contains(".tmp.")
+}
+
+fn collect_dir_entries(
+    base: &Path,
+    current: &Path,
+    out: &mut Vec<(String, Vec<u8>)>,
+) -> Result<(), std::io::Error> {
+    let mut dir_entries: Vec<PathBuf> = std::fs::read_dir(current)?
+        .filter_map(|e| e.ok().map(|entry| entry.path()))
+        .collect();
+    dir_entries.sort();
+
+    for path in dir_entries {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if is_temp_or_ignored_filename(file_name) {
+            continue;
+        }
+
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Symlink detected in skill directory: {}", path.display()),
+            ));
+        }
+
+        if meta.is_dir() {
+            collect_dir_entries(base, &path, out)?;
+        } else if meta.is_file() {
+            let rel = path
+                .strip_prefix(base)
+                .map_err(std::io::Error::other)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let bytes = std::fs::read(&path)?;
+            out.push((rel, bytes));
+        }
+    }
+    Ok(())
+}
+
+/// Computes the canonical SHA-256 digest of a complete skill directory on disk.
+pub fn compute_directory_sha256(dir: &Path) -> Result<String, std::io::Error> {
+    if !dir.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Skill directory does not exist: {}", dir.display()),
+        ));
+    }
+    let mut entries = Vec::new();
+    collect_dir_entries(dir, dir, &mut entries)?;
+    Ok(compute_entries_sha256(&entries))
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParsedFrontmatter {
+    pub name: String,
+    pub description: String,
+    pub supported_agents: Option<Vec<String>>,
+    pub version: Option<String>,
+    pub license: Option<String>,
+}
+
+pub fn parse_frontmatter_metadata(content: &str) -> ParsedFrontmatter {
+    let mut parsed = ParsedFrontmatter::default();
+    let normalized = content.replace("\r\n", "\n");
+    if let Some(rest) = normalized.strip_prefix("---") {
+        if let Some(end_idx) = rest.find("\n---") {
+            let fm = &rest[..end_idx];
+            for line in fm.lines() {
+                let trimmed = line.trim();
+                if let Some(n) = trimmed.strip_prefix("name:") {
+                    parsed.name = n.trim().trim_matches('"').trim_matches('\'').to_string();
+                } else if let Some(d) = trimmed.strip_prefix("description:") {
+                    parsed.description = d.trim().trim_matches('"').trim_matches('\'').to_string();
+                } else if let Some(v) = trimmed.strip_prefix("version:") {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                    if !val.is_empty() {
+                        parsed.version = Some(val);
+                    }
+                } else if let Some(l) = trimmed.strip_prefix("license:") {
+                    let val = l.trim().trim_matches('"').trim_matches('\'').to_string();
+                    if !val.is_empty() {
+                        parsed.license = Some(val);
+                    }
+                } else if let Some(a) = trimmed.strip_prefix("supported_agents:") {
+                    let inner = a.trim().trim_matches('[').trim_matches(']');
+                    let agents: Vec<String> = inner
+                        .split(',')
+                        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !agents.is_empty() {
+                        parsed.supported_agents = Some(agents);
+                    }
+                }
+            }
+        }
+    }
+    parsed
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -338,5 +478,39 @@ supported_agents: ["antigravity", "claude-code"]
             agents,
             Some(vec!["antigravity".to_string(), "claude-code".to_string()])
         );
+    }
+
+    #[test]
+    fn test_parse_frontmatter_metadata_version_and_license() {
+        let md =
+            "---\nname: my-skill\ndescription: test\nversion: \"2.1.0\"\nlicense: MIT\n---\nBody";
+        let parsed = parse_frontmatter_metadata(md);
+        assert_eq!(parsed.name, "my-skill");
+        assert_eq!(parsed.version.as_deref(), Some("2.1.0"));
+        assert_eq!(parsed.license.as_deref(), Some("MIT"));
+    }
+
+    #[test]
+    fn test_canonical_directory_hashing_deterministic_and_ignores_temp() {
+        let temp_dir = std::env::temp_dir().join(format!("test_dir_hash_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("scripts")).unwrap();
+        std::fs::write(temp_dir.join("SKILL.md"), b"# Skill").unwrap();
+        std::fs::write(temp_dir.join("scripts/run.sh"), b"echo hi").unwrap();
+        std::fs::write(temp_dir.join("SKILL.md.tmp.123"), b"ignored").unwrap();
+
+        let disk_hash = compute_directory_sha256(&temp_dir).unwrap();
+        let entries_hash = compute_entries_sha256(&[
+            ("scripts\\run.sh".to_string(), b"echo hi".to_vec()),
+            ("SKILL.md".to_string(), b"# Skill".to_vec()),
+        ]);
+        assert_eq!(disk_hash, entries_hash);
+
+        // Mutating a supporting file changes the hash
+        std::fs::write(temp_dir.join("scripts/run.sh"), b"echo tampered").unwrap();
+        let tampered_hash = compute_directory_sha256(&temp_dir).unwrap();
+        assert_ne!(disk_hash, tampered_hash);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

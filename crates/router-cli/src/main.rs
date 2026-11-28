@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use router_core::{RouteOptions, SkillRouter};
+use serde::Serialize;
 use skill_discovery::DirectoryResolver;
 use skill_lifecycle::{InstallOptions, InstalledTracker};
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ use std::process;
     name = "skill-router",
     author,
     version,
-    about = "Automatic Agent Skill Router V0.3"
+    about = "Automatic Agent Skill Router V0.3.2"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -19,6 +20,10 @@ struct Cli {
     /// Task description when using default route command
     #[arg(trailing_var_arg = true)]
     task_words: Vec<String>,
+
+    /// Workspace root directory
+    #[arg(long, global = true, default_value = ".")]
+    root: PathBuf,
 
     /// Output as JSON
     #[arg(long, global = true)]
@@ -77,7 +82,7 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
-    /// Install skill from upstream repository
+    /// Install skill from upstream repository (dry-run by default unless --execute is passed)
     #[command(alias = "install:skill")]
     InstallSkill {
         #[arg(long)]
@@ -86,8 +91,13 @@ enum Commands {
         skill: String,
         #[arg(long, default_value = "antigravity")]
         agent: String,
+        /// Execute installation and write files/ledger
         #[arg(long)]
         execute: bool,
+        /// Preview installation plan without modifying files (default)
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm installation of RESTRICTED skills or overwrite of modified skills
         #[arg(long)]
         force: bool,
     },
@@ -97,55 +107,59 @@ enum Commands {
     /// Verify cryptographic integrity of installed skills
     #[command(alias = "verify:skills")]
     VerifySkills {},
-    /// Check and update installed skills
-    #[command(alias = "update:skills")]
-    UpdateSkills {
-        #[arg(long)]
-        force: bool,
-    },
+    /// Check upstream repositories for available updates (read-only; does not install)
+    #[command(visible_alias = "update-skills", alias = "update:skills")]
+    CheckUpdates {},
+}
+
+fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
+    let serialized = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("Failed to serialize JSON output: {}", e))?;
+    println!("{}", serialized);
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let raw_args: Vec<String> = std::env::args().collect();
+    let used_deprecated_update_alias = raw_args
+        .iter()
+        .any(|a| a == "update:skills" || a == "update-skills");
 
-    // Normalize aliases like sync:catalog -> sync-catalog before parsing
-    let normalized_args: Vec<String> = args
+    // Normalize legacy colon aliases before clap parsing
+    let normalized_args: Vec<String> = raw_args
         .into_iter()
-        .map(|a| {
-            if a == "sync:catalog" {
-                "sync-catalog".to_string()
-            } else if a == "install:skill" {
-                "install-skill".to_string()
-            } else if a == "list:skills" {
-                "list-skills".to_string()
-            } else if a == "verify:skills" {
-                "verify-skills".to_string()
-            } else if a == "update:skills" {
-                "update-skills".to_string()
-            } else {
-                a
-            }
+        .map(|a| match a.as_str() {
+            "sync:catalog" => "sync-catalog".to_string(),
+            "install:skill" => "install-skill".to_string(),
+            "list:skills" => "list-skills".to_string(),
+            "verify:skills" => "verify-skills".to_string(),
+            "update:skills" => "check-updates".to_string(),
+            _ => a,
         })
         .collect();
 
     let cli = match Cli::try_parse_from(&normalized_args) {
         Ok(c) => c,
-        Err(e) => {
-            e.exit();
-        }
+        Err(e) => e.exit(),
     };
 
-    let root_dir = PathBuf::from(".");
+    if used_deprecated_update_alias {
+        eprintln!(
+            "Warning: 'update-skills' / 'update:skills' is a deprecated alias for 'check-updates' (check-only; does not install updates)."
+        );
+    }
+
+    let root_dir = cli.root.clone();
     let router = SkillRouter::new(&root_dir, cli.no_network);
 
-    let result = match cli.command {
+    let result: Result<(), String> = match cli.command {
         Some(Commands::Sort { task, workflow }) => {
             let task_str = task.join(" ");
             match router.sort(&task_str, Some(&workflow)) {
                 Ok(triage) => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&triage).unwrap());
+                        print_json(&triage)
                     } else {
                         println!("=== SORT-THE-ISSUE TRIAGE ===");
                         println!("Outcome: {}", triage.outcome);
@@ -168,8 +182,8 @@ async fn main() {
                                 }
                             );
                         }
+                        Ok(())
                     }
-                    Ok(())
                 }
                 Err(e) => Err(e.to_string()),
             }
@@ -191,9 +205,9 @@ async fn main() {
             match router.route(&task_str, &options).await {
                 Ok(route_res) => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&route_res).unwrap());
+                        print_json(&route_res)
                     } else {
-                        println!("=== AUTOMATIC SKILL ROUTER V0.3 ===");
+                        println!("=== AUTOMATIC SKILL ROUTER V0.3.2 ===");
                         println!("Task: {}", route_res.triage.outcome);
                         println!("Mandatory First Skill: {}", route_res.mandatory_first_skill);
                         println!(
@@ -226,8 +240,8 @@ async fn main() {
                                 );
                             }
                         }
+                        Ok(())
                     }
-                    Ok(())
                 }
                 Err(e) => Err(e.to_string()),
             }
@@ -240,7 +254,7 @@ async fn main() {
             let q_str = query.join(" ");
             let ranked = router.find(&q_str, &agent, limit).await;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&ranked).unwrap());
+                print_json(&ranked)
             } else {
                 println!("=== Discovered Skills for '{}' ===", q_str);
                 for r in ranked {
@@ -250,14 +264,14 @@ async fn main() {
                     );
                     println!("  {}", r.skill.description);
                 }
+                Ok(())
             }
-            Ok(())
         }
         Some(Commands::SyncCatalog { limit, reset }) => {
             match router.remote_registry.sync_catalog(limit, reset).await {
                 Ok(result) => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        print_json(&result)
                     } else {
                         println!(
                             "Registry sync complete: {} skills indexed across {} page(s).",
@@ -265,17 +279,14 @@ async fn main() {
                         );
                         if !result.complete {
                             println!(
-                                "Partial sync saved at next offset {}. Re-run sync:catalog to resume.",
+                                "Partial sync saved at next offset {}. Re-run sync-catalog to resume.",
                                 result.next_offset
                             );
                         }
+                        Ok(())
                     }
-                    Ok(())
                 }
-                Err(e) => {
-                    eprintln!("Sync error: {}", e);
-                    process::exit(1);
-                }
+                Err(e) => Err(format!("Sync error: {}", e)),
             }
         }
         Some(Commands::InstallSkill {
@@ -283,81 +294,88 @@ async fn main() {
             skill,
             agent,
             execute,
+            dry_run,
             force,
         }) => {
-            let resolver = DirectoryResolver::new();
-            let resolution = resolver
-                .resolve_skill_directory(&repo, &skill, None, None)
-                .await;
-            if !resolution.success {
-                let err_msg = resolution
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Directory resolution failed.".to_string());
-                if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&resolution).unwrap());
-                } else {
-                    eprintln!("Error: {}", err_msg);
-                }
-                process::exit(1);
-            }
-
-            let exact_dir = resolution.exact_directory.clone().unwrap_or_default();
-            let install_cmd = resolution.install_command.clone().unwrap_or_default();
-
-            if !execute {
-                if cli.json {
-                    let preview = serde_json::json!({
-                        "status": "DRY_RUN",
-                        "repository": repo,
-                        "targetSkill": skill,
-                        "exactDirectory": exact_dir,
-                        "installCommand": install_cmd,
-                        "targetAgent": agent,
-                        "action": "Re-run with --execute to perform installation."
-                    });
-                    println!("{}", serde_json::to_string_pretty(&preview).unwrap());
-                } else {
-                    println!("=== Skill Installation Plan (Dry Run) ===");
-                    println!("Repository: {}", repo);
-                    println!("Requested Skill: {}", skill);
-                    println!("Resolved Directory: {}", exact_dir);
-                    println!("Target Agent: {}", agent);
-                    println!("Install Command: {}", install_cmd);
-                    println!("License: Reviewed upstream license");
-                    println!("\nDry run only. Re-run with --execute after reviewing the upstream source and license.");
-                }
-                Ok(())
+            if execute && dry_run {
+                Err("Cannot specify both --execute and --dry-run.".to_string())
             } else {
-                let tracker = InstalledTracker::new(&root_dir);
-                let options = InstallOptions {
-                    repo,
-                    skill: skill.clone(),
-                    agent,
-                    force,
-                    token: None,
-                    tree_fixture: None,
-                    content_fixture: None,
-                };
-
-                match tracker.install_skill(&options).await {
-                    Ok(installed) => {
-                        if cli.json {
-                            println!("{}", serde_json::to_string_pretty(&installed).unwrap());
-                        } else {
-                            println!(
-                                "\nSkill '{}' successfully installed and recorded in .installed-skills.json.",
-                                installed.name
-                            );
-                            println!("  Path: {}", installed.installation_path);
-                            println!("  Content SHA-256: {}", installed.content_hash);
-                            println!("  Trust Status: {}", installed.trust_status);
-                        }
-                        Ok(())
+                let resolver =
+                    DirectoryResolver::with_config("https://api.github.com", 15, cli.no_network);
+                let resolution = resolver
+                    .resolve_skill_directory(&repo, &skill, None, None)
+                    .await;
+                if !resolution.success {
+                    if cli.json {
+                        let _ = print_json(&resolution);
                     }
-                    Err(e) => {
-                        eprintln!("Error during installation: {}", e);
-                        process::exit(1);
+                    Err(resolution
+                        .message
+                        .unwrap_or_else(|| "Directory resolution failed.".to_string()))
+                } else {
+                    let exact_dir = resolution.exact_directory.unwrap_or_default();
+                    let install_cmd = resolution.install_command.unwrap_or_default();
+
+                    if !execute || dry_run {
+                        if cli.json {
+                            let preview = serde_json::json!({
+                                "status": "DRY_RUN",
+                                "repository": repo,
+                                "targetSkill": skill,
+                                "exactDirectory": exact_dir,
+                                "installCommand": install_cmd,
+                                "targetAgent": agent,
+                                "license": "UNSPECIFIED",
+                                "action": "Re-run with --execute to perform installation."
+                            });
+                            print_json(&preview)
+                        } else {
+                            println!("=== Skill Installation Plan (Dry Run) ===");
+                            println!("Repository: {}", repo);
+                            println!("Requested Skill: {}", skill);
+                            println!("Resolved Directory: {}", exact_dir);
+                            println!("Target Agent: {}", agent);
+                            println!("Install Command: {}", install_cmd);
+                            println!("License: UNSPECIFIED (verify upstream before executing)");
+                            println!("\nDry run only. Re-run with --execute after reviewing the upstream source.");
+                            Ok(())
+                        }
+                    } else {
+                        let ledger_path = root_dir.join(".installed-skills.json");
+                        let tracker = InstalledTracker::with_config(
+                            &root_dir,
+                            &ledger_path,
+                            "https://api.github.com",
+                            "https://raw.githubusercontent.com",
+                            15,
+                            cli.no_network,
+                        );
+                        let options = InstallOptions {
+                            repo,
+                            skill,
+                            agent,
+                            force,
+                            ..Default::default()
+                        };
+
+                        match tracker.install_skill(&options).await {
+                            Ok(installed) => {
+                                if cli.json {
+                                    print_json(&installed)
+                                } else {
+                                    println!(
+                                        "\nSkill '{}' successfully installed and recorded in .installed-skills.json.",
+                                        installed.name
+                                    );
+                                    println!("  Path: {}", installed.installation_path);
+                                    println!("  Commit SHA: {}", installed.commit_sha);
+                                    println!("  Directory SHA-256: {}", installed.content_hash);
+                                    println!("  Trust Status: {}", installed.trust_status);
+                                    Ok(())
+                                }
+                            }
+                            Err(e) => Err(format!("Error during installation: {}", e)),
+                        }
                     }
                 }
             }
@@ -367,32 +385,34 @@ async fn main() {
             match tracker.list_skills() {
                 Ok(skills) => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&skills).unwrap());
+                        print_json(&skills)
                     } else if skills.is_empty() {
                         println!("No skills currently recorded in .installed-skills.json.");
+                        Ok(())
                     } else {
                         println!("=== Installed Skills ({}) ===", skills.len());
                         for s in skills {
                             println!(
-                                "- {} (Source: {}, Version: {})",
-                                s.name, s.source, s.version
+                                "- {} (Source: {}, Version: {}, Commit: {})",
+                                s.name, s.source, s.version, s.commit_sha
                             );
                         }
+                        Ok(())
                     }
-                    Ok(())
                 }
-                Err(e) => {
-                    eprintln!("Error loading ledger: {}", e);
-                    process::exit(1);
-                }
+                Err(e) => Err(format!("Error loading ledger: {}", e)),
             }
         }
         Some(Commands::VerifySkills {}) => {
             let tracker = InstalledTracker::new(&root_dir);
             match tracker.verify_skills() {
                 Ok(report) => {
+                    let has_failures = report.modified > 0 || report.missing > 0;
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                        if let Err(e) = print_json(&report) {
+                            eprintln!("Error: {}", e);
+                            process::exit(1);
+                        }
                     } else {
                         println!("=== Skill Integrity Report ===");
                         println!(
@@ -408,52 +428,58 @@ async fn main() {
                             );
                         }
                     }
-                    if report.modified > 0 || report.missing > 0 {
+                    if has_failures {
                         process::exit(1);
                     }
                     Ok(())
                 }
-                Err(e) => {
-                    eprintln!("Error verifying skills: {}", e);
-                    process::exit(1);
-                }
+                Err(e) => Err(format!("Error verifying skills: {}", e)),
             }
         }
-        Some(Commands::UpdateSkills { force: _ }) => {
-            let tracker = InstalledTracker::new(&root_dir);
+        Some(Commands::CheckUpdates {}) => {
+            let ledger_path = root_dir.join(".installed-skills.json");
+            let tracker = InstalledTracker::with_config(
+                &root_dir,
+                &ledger_path,
+                "https://api.github.com",
+                "https://raw.githubusercontent.com",
+                15,
+                cli.no_network,
+            );
             match tracker.check_for_updates().await {
                 Ok(updates) => {
                     if cli.json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&serde_json::json!({
-                                "total": updates.len(),
-                                "updates": updates
-                            }))
-                            .unwrap()
-                        );
+                        let payload = serde_json::json!({
+                            "total": updates.len(),
+                            "updates": updates
+                        });
+                        print_json(&payload)
                     } else if updates.is_empty() {
-                        println!("No installed skills tracked to update.");
+                        println!("No installed skills tracked.");
+                        Ok(())
                     } else {
-                        println!("=== INSTALLED SKILLS UPDATE STATUS ===");
+                        println!("=== INSTALLED SKILLS UPDATE STATUS (CHECK ONLY) ===");
                         for u in &updates {
                             println!(
-                                "- {} (Source: {}, Version: {}) -> {}",
-                                u.name, u.source, u.current_version, u.status
+                                "- {} (Source: {}, Current SHA: {}, Latest SHA: {}) -> {}",
+                                u.name,
+                                u.source,
+                                u.current_commit_sha,
+                                u.latest_commit_sha.as_deref().unwrap_or("UNKNOWN"),
+                                u.status
                             );
                         }
+                        Ok(())
                     }
-                    Ok(())
                 }
-                Err(e) => {
-                    eprintln!("Error checking updates: {}", e);
-                    process::exit(1);
-                }
+                Err(e) => Err(format!("Error checking updates: {}", e)),
             }
         }
         None => {
             if cli.task_words.is_empty() {
-                eprintln!("Usage: skill-router [sort|route|find|sync-catalog|install-skill|list-skills|verify-skills] \"<task>\" [--json] [--workflow auto|single|multi]");
+                eprintln!(
+                    "Usage: skill-router [sort|route|find|sync-catalog|install-skill|list-skills|verify-skills|check-updates] \"<task>\" [--json] [--workflow auto|single|multi]"
+                );
                 process::exit(2);
             }
             let task_str = cli.task_words.join(" ");
@@ -467,9 +493,9 @@ async fn main() {
             match router.route(&task_str, &options).await {
                 Ok(route_res) => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&route_res).unwrap());
+                        print_json(&route_res)
                     } else {
-                        println!("=== AUTOMATIC SKILL ROUTER V0.3 ===");
+                        println!("=== AUTOMATIC SKILL ROUTER V0.3.2 ===");
                         println!("Task: {}", route_res.triage.outcome);
                         println!("Mandatory First Skill: {}", route_res.mandatory_first_skill);
                         println!(
@@ -478,8 +504,8 @@ async fn main() {
                             route_res.triage.complexity.total_score
                         );
                         println!("Workflow: {}", route_res.routing.workflow);
+                        Ok(())
                     }
-                    Ok(())
                 }
                 Err(e) => Err(e.to_string()),
             }

@@ -396,4 +396,87 @@ mod tests {
         assert!(!opts.local_only);
         assert!(opts.strict_compatibility);
     }
+
+    #[tokio::test]
+    async fn test_tampered_installed_directory_blocks_activation() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_router_tamper_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(temp_dir.join("skills/core/sort-the-issue")).unwrap();
+        std::fs::write(
+            temp_dir.join("skills/core/sort-the-issue/SKILL.md"),
+            "---\nname: sort-the-issue\ndescription: triage\n---\n# Triage",
+        )
+        .unwrap();
+
+        // Install a multi-file skill into the temp workspace
+        let tracker = InstalledTracker::new(&temp_dir);
+        let install_opts = skill_lifecycle::InstallOptions {
+            repo: "owner/repo".to_string(),
+            skill: "auth-fixer".to_string(),
+            agent: "antigravity".to_string(),
+            tree_fixture: Some(vec![
+                skill_discovery::GitTreeItem {
+                    path: "auth-fixer/SKILL.md".to_string(),
+                    item_type: "blob".to_string(),
+                    sha: "1".to_string(),
+                    size: None,
+                    mode: None,
+                },
+                skill_discovery::GitTreeItem {
+                    path: "auth-fixer/scripts/check.sh".to_string(),
+                    item_type: "blob".to_string(),
+                    sha: "2".to_string(),
+                    size: None,
+                    mode: None,
+                },
+            ]),
+            files_fixture: Some(vec![
+                (
+                    "SKILL.md".to_string(),
+                    "---\nname: auth-fixer\ndescription: Fix auth login bugs\n---\n# Auth Fixer"
+                        .to_string(),
+                ),
+                ("scripts/check.sh".to_string(), "echo ok".to_string()),
+            ]),
+            commit_sha_fixture: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+            ..Default::default()
+        };
+        tracker.install_skill(&install_opts).await.unwrap();
+
+        // Tamper with the supporting file on disk!
+        std::fs::write(
+            temp_dir.join(".agents/skills/auth-fixer/scripts/check.sh"),
+            "echo pwned",
+        )
+        .unwrap();
+
+        let router = SkillRouter::new(&temp_dir, true);
+        let res = router
+            .route(
+                "Fix auth login bug",
+                &RouteOptions {
+                    no_network: true,
+                    local_only: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            res.activation.activations.is_empty(),
+            "Tampered skill must NEVER be activated"
+        );
+        assert!(
+            res.activation.failures.iter().any(|f| f
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .contains("HASH_MISMATCH")),
+            "Expected HASH_MISMATCH failure, got: {:?}",
+            res.activation.failures
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

@@ -998,6 +998,7 @@ dependencies = [
  "task-intelligence",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
