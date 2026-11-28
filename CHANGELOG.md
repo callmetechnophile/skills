@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2.3] - 2026-11-29 (feat/rust-core-v0.3)
+
+### Changed
+- **Production API Isolation (`skill-lifecycle`):** Removed `ConcurrentLedgerHook`, `FailStage`, `InstallOptions.concurrent_hook`, and `InstallOptions.fail_stage` from the public production API. Moved all fault-injection and concurrent ledger mutation hooks into `#[cfg(test)]`-only `TestInstallHooks` and `install_skill_with_hooks()`.
+- **Documentation (`V0.3_ACCEPTANCE_CRITERIA.md`):** Documented the ledger read/validate/write race window, absence of cross-process advisory locking, and distinction between simulated interleaving tests and multi-process testing.
+
 ## [0.3.2.2] - 2026-11-29 (feat/rust-core-v0.3)
 
 ### Fixed

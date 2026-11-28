@@ -157,17 +157,26 @@ impl Default for InstallLimits {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailStage {
+enum FailStage {
     FilesystemReplace,
     LedgerCommit,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConcurrentLedgerHook {
+enum ConcurrentLedgerHook {
     DeleteEntry,
     CreateEntry,
     MutateHash,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestInstallHooks {
+    fail_stage: Option<FailStage>,
+    concurrent_hook: Option<ConcurrentLedgerHook>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,8 +191,6 @@ pub struct InstallOptions {
     pub files_fixture: Option<Vec<(String, String)>>,
     pub commit_sha_fixture: Option<String>,
     pub limits: InstallLimits,
-    pub fail_stage: Option<FailStage>,
-    pub concurrent_hook: Option<ConcurrentLedgerHook>,
 }
 
 impl Default for InstallOptions {
@@ -199,8 +206,6 @@ impl Default for InstallOptions {
             files_fixture: None,
             commit_sha_fixture: None,
             limits: InstallLimits::default(),
-            fail_stage: None,
-            concurrent_hook: None,
         }
     }
 }
@@ -609,6 +614,28 @@ impl InstalledTracker {
         &self,
         options: &InstallOptions,
     ) -> Result<InstalledSkill, LifecycleError> {
+        self.install_skill_impl(
+            options,
+            #[cfg(test)]
+            TestInstallHooks::default(),
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    async fn install_skill_with_hooks(
+        &self,
+        options: &InstallOptions,
+        hooks: TestInstallHooks,
+    ) -> Result<InstalledSkill, LifecycleError> {
+        self.install_skill_impl(options, hooks).await
+    }
+
+    async fn install_skill_impl(
+        &self,
+        options: &InstallOptions,
+        #[cfg(test)] hooks: TestInstallHooks,
+    ) -> Result<InstalledSkill, LifecycleError> {
         // Stage 1: Input validation
         if options.repo.contains("..")
             || options.skill.contains("..")
@@ -1014,11 +1041,14 @@ impl InstalledTracker {
             }
         }
 
-        let replace_res = if options.fail_stage == Some(FailStage::FilesystemReplace) {
+        #[cfg(test)]
+        let replace_res = if hooks.fail_stage == Some(FailStage::FilesystemReplace) {
             Err(std::io::Error::other("Injected FilesystemReplace failure"))
         } else {
             std::fs::rename(&staging_dir, &dest_abs_dir)
         };
+        #[cfg(not(test))]
+        let replace_res = std::fs::rename(&staging_dir, &dest_abs_dir);
 
         if let Err(e) = replace_res {
             let mut notes = Vec::new();
@@ -1059,7 +1089,8 @@ impl InstalledTracker {
             last_verification: Utc::now(),
         };
 
-        if let Some(hook) = options.concurrent_hook {
+        #[cfg(test)]
+        if let Some(hook) = hooks.concurrent_hook {
             if let Ok(mut ledger) = self.load_ledger() {
                 match hook {
                     ConcurrentLedgerHook::DeleteEntry => {
@@ -1084,13 +1115,17 @@ impl InstalledTracker {
             }
         }
 
-        let ledger_res = if options.fail_stage == Some(FailStage::LedgerCommit) {
+        #[cfg(test)]
+        let ledger_res = if hooks.fail_stage == Some(FailStage::LedgerCommit) {
             Err(LifecycleError::Io(std::io::Error::other(
                 "Injected LedgerCommit failure",
             )))
         } else {
             self.commit_verified_ledger_record(record.clone(), expected_prev_hash.as_deref())
         };
+        #[cfg(not(test))]
+        let ledger_res =
+            self.commit_verified_ledger_record(record.clone(), expected_prev_hash.as_deref());
 
         if let Err(e) = ledger_res {
             let mut rollback_notes = Vec::new();
@@ -2101,11 +2136,18 @@ mod tests {
             files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
             commit_sha_fixture: Some(SHA_B.to_string()),
             force: true,
-            fail_stage: Some(FailStage::FilesystemReplace),
             ..Default::default()
         };
         assert!(matches!(
-            tracker.install_skill(&replace_fail_opts).await,
+            tracker
+                .install_skill_with_hooks(
+                    &replace_fail_opts,
+                    TestInstallHooks {
+                        fail_stage: Some(FailStage::FilesystemReplace),
+                        ..Default::default()
+                    }
+                )
+                .await,
             Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "FilesystemReplace"
         ));
         let on_disk =
@@ -2120,11 +2162,18 @@ mod tests {
             files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
             commit_sha_fixture: Some(SHA_B.to_string()),
             force: true,
-            fail_stage: Some(FailStage::LedgerCommit),
             ..Default::default()
         };
         assert!(matches!(
-            tracker.install_skill(&ledger_fail_opts).await,
+            tracker
+                .install_skill_with_hooks(
+                    &ledger_fail_opts,
+                    TestInstallHooks {
+                        fail_stage: Some(FailStage::LedgerCommit),
+                        ..Default::default()
+                    }
+                )
+                .await,
             Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
         ));
         let on_disk_after =
@@ -2317,11 +2366,18 @@ mod tests {
             tree_fixture: Some(tree.clone()),
             files_fixture: Some(vec![("SKILL.md".to_string(), "# V1".to_string())]),
             commit_sha_fixture: Some(SHA_A.to_string()),
-            concurrent_hook: Some(ConcurrentLedgerHook::CreateEntry),
             ..Default::default()
         };
         assert!(matches!(
-            tracker.install_skill(&first_conc_opts).await,
+            tracker
+                .install_skill_with_hooks(
+                    &first_conc_opts,
+                    TestInstallHooks {
+                        concurrent_hook: Some(ConcurrentLedgerHook::CreateEntry),
+                        ..Default::default()
+                    }
+                )
+                .await,
             Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
         ));
         assert!(
@@ -2356,11 +2412,18 @@ mod tests {
             files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
             commit_sha_fixture: Some(SHA_B.to_string()),
             force: true,
-            concurrent_hook: Some(ConcurrentLedgerHook::MutateHash),
             ..Default::default()
         };
         assert!(matches!(
-            tracker.install_skill(&mut_hash_opts).await,
+            tracker
+                .install_skill_with_hooks(
+                    &mut_hash_opts,
+                    TestInstallHooks {
+                        concurrent_hook: Some(ConcurrentLedgerHook::MutateHash),
+                        ..Default::default()
+                    }
+                )
+                .await,
             Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
         ));
         assert_eq!(
@@ -2386,11 +2449,18 @@ mod tests {
             files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
             commit_sha_fixture: Some(SHA_B.to_string()),
             force: false,
-            concurrent_hook: Some(ConcurrentLedgerHook::DeleteEntry),
             ..Default::default()
         };
         assert!(matches!(
-            tracker.install_skill(&del_opts).await,
+            tracker
+                .install_skill_with_hooks(
+                    &del_opts,
+                    TestInstallHooks {
+                        concurrent_hook: Some(ConcurrentLedgerHook::DeleteEntry),
+                        ..Default::default()
+                    }
+                )
+                .await,
             Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
         ));
         assert_eq!(
