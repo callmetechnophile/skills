@@ -163,6 +163,13 @@ pub enum FailStage {
     LedgerCommit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcurrentLedgerHook {
+    DeleteEntry,
+    CreateEntry,
+    MutateHash,
+}
+
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub repo: String,
@@ -176,6 +183,7 @@ pub struct InstallOptions {
     pub commit_sha_fixture: Option<String>,
     pub limits: InstallLimits,
     pub fail_stage: Option<FailStage>,
+    pub concurrent_hook: Option<ConcurrentLedgerHook>,
 }
 
 impl Default for InstallOptions {
@@ -192,6 +200,7 @@ impl Default for InstallOptions {
             commit_sha_fixture: None,
             limits: InstallLimits::default(),
             fail_stage: None,
+            concurrent_hook: None,
         }
     }
 }
@@ -475,14 +484,17 @@ impl InstalledTracker {
                 }
                 ledger.installed[idx] = skill;
             }
-            (Some(idx), None) => {
-                // Only valid if force was used on an untracked dir, or concurrent install happened.
-                // Check if another install appeared concurrently when none was expected.
-                ledger.installed[idx] = skill;
+            (Some(_), None) => {
+                return Err(LifecycleError::OverwriteRefused(format!(
+                    "Concurrent installation detected for '{}': a ledger entry appeared before commit.",
+                    skill.name
+                )));
             }
-            (None, Some(_)) => {
-                // Previous entry was removed concurrently; push new record.
-                ledger.installed.push(skill);
+            (None, Some(prev_hash)) => {
+                return Err(LifecycleError::OverwriteRefused(format!(
+                    "Concurrent ledger modification detected for '{}': expected previous entry (hash {}) disappeared before commit.",
+                    skill.name, prev_hash
+                )));
             }
             (None, None) => {
                 ledger.installed.push(skill);
@@ -1046,6 +1058,31 @@ impl InstalledTracker {
             installed_at: Utc::now(),
             last_verification: Utc::now(),
         };
+
+        if let Some(hook) = options.concurrent_hook {
+            if let Ok(mut ledger) = self.load_ledger() {
+                match hook {
+                    ConcurrentLedgerHook::DeleteEntry => {
+                        ledger.installed.retain(|s| s.skill_id != record.skill_id);
+                        let _ = self.save_ledger(ledger);
+                    }
+                    ConcurrentLedgerHook::CreateEntry => {
+                        let mut other = record.clone();
+                        other.content_hash = "concurrent_created_hash".to_string();
+                        ledger.installed.push(other);
+                        let _ = self.save_ledger(ledger);
+                    }
+                    ConcurrentLedgerHook::MutateHash => {
+                        for s in &mut ledger.installed {
+                            if s.skill_id == record.skill_id {
+                                s.content_hash = "concurrent_mutated_hash".to_string();
+                            }
+                        }
+                        let _ = self.save_ledger(ledger);
+                    }
+                }
+            }
+        }
 
         let ledger_res = if options.fail_stage == Some(FailStage::LedgerCommit) {
             Err(LifecycleError::Io(std::io::Error::other(
@@ -2252,6 +2289,118 @@ mod tests {
             tracker.record_installation(r3.clone(), false),
             Err(LifecycleError::TamperDetected(_))
         ));
+        assert_no_temp_dirs(&skills_base);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_v0322_concurrent_ledger_integrity_and_rollback() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_v0322_conc_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let tracker = create_test_tracker(&temp_dir);
+        let skills_base = temp_dir.join(".agents/skills");
+
+        let tree = vec![GitTreeItem {
+            path: "conc/SKILL.md".to_string(),
+            item_type: "blob".to_string(),
+            sha: "1".to_string(),
+            size: None,
+            mode: None,
+        }];
+
+        // 1. Concurrent ledger entry creation during a first installation -> must reject & roll back FS
+        let first_conc_opts = InstallOptions {
+            repo: "owner/repo".to_string(),
+            skill: "conc".to_string(),
+            tree_fixture: Some(tree.clone()),
+            files_fixture: Some(vec![("SKILL.md".to_string(), "# V1".to_string())]),
+            commit_sha_fixture: Some(SHA_A.to_string()),
+            concurrent_hook: Some(ConcurrentLedgerHook::CreateEntry),
+            ..Default::default()
+        };
+        assert!(matches!(
+            tracker.install_skill(&first_conc_opts).await,
+            Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
+        ));
+        assert!(
+            !skills_base.join("conc").exists(),
+            "Rolled-back first install must not leave directory on disk"
+        );
+        let ledger_after_create = tracker.load_ledger().unwrap();
+        assert_eq!(
+            ledger_after_create.installed[0].content_hash,
+            "concurrent_created_hash"
+        );
+        assert_no_temp_dirs(&skills_base);
+
+        // Reset clean state and do a valid first install
+        let _ = std::fs::remove_file(&tracker.ledger_path);
+        let valid_v1 = InstallOptions {
+            repo: "owner/repo".to_string(),
+            skill: "conc".to_string(),
+            tree_fixture: Some(tree.clone()),
+            files_fixture: Some(vec![("SKILL.md".to_string(), "# V1 Clean".to_string())]),
+            commit_sha_fixture: Some(SHA_A.to_string()),
+            ..Default::default()
+        };
+        let r1 = tracker.install_skill(&valid_v1).await.unwrap();
+        assert_no_temp_dirs(&skills_base);
+
+        // 2. Concurrent ledger hash modification during an update (even with --force!) -> must reject & restore V1
+        let mut_hash_opts = InstallOptions {
+            repo: "owner/repo".to_string(),
+            skill: "conc".to_string(),
+            tree_fixture: Some(tree.clone()),
+            files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
+            commit_sha_fixture: Some(SHA_B.to_string()),
+            force: true,
+            concurrent_hook: Some(ConcurrentLedgerHook::MutateHash),
+            ..Default::default()
+        };
+        assert!(matches!(
+            tracker.install_skill(&mut_hash_opts).await,
+            Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
+        ));
+        assert_eq!(
+            std::fs::read_to_string(skills_base.join("conc/SKILL.md")).unwrap(),
+            "# V1 Clean"
+        );
+        assert_eq!(
+            tracker.load_ledger().unwrap().installed[0].content_hash,
+            "concurrent_mutated_hash"
+        );
+        assert_no_temp_dirs(&skills_base);
+
+        // Restore expected hash in ledger for next test
+        let mut l = tracker.load_ledger().unwrap();
+        l.installed[0].content_hash = r1.content_hash.clone();
+        tracker.save_ledger(l).unwrap();
+
+        // 3. Concurrent ledger entry deletion during an update -> must reject instead of recreating & restore V1
+        let del_opts = InstallOptions {
+            repo: "owner/repo".to_string(),
+            skill: "conc".to_string(),
+            tree_fixture: Some(tree),
+            files_fixture: Some(vec![("SKILL.md".to_string(), "# V2".to_string())]),
+            commit_sha_fixture: Some(SHA_B.to_string()),
+            force: false,
+            concurrent_hook: Some(ConcurrentLedgerHook::DeleteEntry),
+            ..Default::default()
+        };
+        assert!(matches!(
+            tracker.install_skill(&del_opts).await,
+            Err(LifecycleError::TransactionFailed { ref stage, .. }) if stage == "LedgerCommit"
+        ));
+        assert_eq!(
+            std::fs::read_to_string(skills_base.join("conc/SKILL.md")).unwrap(),
+            "# V1 Clean"
+        );
+        assert!(
+            tracker.load_ledger().unwrap().installed.is_empty(),
+            "Deleted ledger entry must not be silently recreated"
+        );
         assert_no_temp_dirs(&skills_base);
 
         let _ = std::fs::remove_dir_all(&temp_dir);

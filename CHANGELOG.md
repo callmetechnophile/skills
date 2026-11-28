@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2.2] - 2026-11-29 (feat/rust-core-v0.3)
+
+### Fixed
+- **Concurrent Ledger Integrity (`skill-lifecycle`):** Hardened `commit_verified_ledger_record()` to reject concurrent ledger entry creation during a first installation and concurrent ledger entry deletion during an update, triggering filesystem rollback instead of silently overwriting or recreating records.
+- **Regression Tests:** Added `test_v0322_concurrent_ledger_integrity_and_rollback` verifying concurrent creation, hash mutation (including under `--force`), and deletion with full filesystem and ledger state assertions.
+- **Acceptance Criteria:** Reconciled `docs/releases/V0.3_ACCEPTANCE_CRITERIA.md` with GitHub Actions run `46180380298` (`6abf6aba151711f0c8224e055d95d908f3667865`) and separated automated test evidence from manual review notes.
+
 ## [0.3.2.1] - 2026-11-29 (feat/rust-core-v0.3)
 
 ### Fixed
