@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2.1] - 2026-11-29 (feat/rust-core-v0.3)
+
+### Fixed
+- **Installation Update Transaction (`skill-lifecycle`):** Fixed bug where updating an intact installed skill to a new commit without `--force` failed during ledger commit because `record_installation()` re-compared the newly replaced destination directory against the previous ledger hash. Added `commit_verified_ledger_record()` which validates concurrent ledger consistency against the pre-replacement hash.
+- **Fail-Closed Integrity Verification (`skill-lifecycle`):** Replaced `if let Ok(...)` in `record_installation()` with explicit `Result` propagation (`LifecycleError::TamperDetected`) and blocked recording `REJECTED` / `QUARANTINED` trust states even under `--force`.
+- **Regression Tests:** Added `test_v0321_update_intact_reinstall_untracked_and_fail_closed_matrix` covering all 10 transaction, overwrite, fail-closed, rollback, and temp-dir cleanup invariants.
+
 ## [0.3.2] - 2026-11-29 (feat/rust-core-v0.3)
 
 ### Security & Reliability
